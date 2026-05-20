@@ -29,14 +29,17 @@ The idea came when I encountered a machine that cut stamps from magazines and ca
 
 
 **Framework**
+
 Expo SDK 54 (managed workflow)
 React Native 0.81.5
 TypeScript 5.9
 
 **Navigation**
+
 React Navigation 7 — bottom tabs + native stack
 
 **Camera & Media**
+
 expo-camera — live viewfinder and photo capture
 expo-image-manipulator — crop photo to stamp outline after capture
 expo-file-system — persist images to permanent device storage
@@ -44,17 +47,21 @@ react-native-view-shot — capture rendered stamp (with border) as an image for 
 expo-sharing — system share sheet
 
 **Graphics**
+
 react-native-svg — perforated stamp borders drawn as SVG paths (general polygon engine supporting square, landscape, portrait, diamond, and triangle shapes)
 React Native CSS filter property (RN 0.74+) — B&W and fade filters applied at render time, no native module needed
 
 **Database**
+
 expo-sqlite v16 (synchronous API) — local on-device storage for stamps, categories, calendar entries, and favourites
 
 **Gestures & Animation**
+
 React Native PanResponder — horizontal swipe to cycle camera filters
 React Native Animated — shutter press feedback
 
 **Target Platforms**
+
 iOS, Android (and Expo Go for development)
 
 
