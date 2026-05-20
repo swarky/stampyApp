@@ -19,6 +19,14 @@ The idea came when I encountered a machine that cut stamps from magazines and ca
 - Export full page
 
 
+**Screenshots :**
+<img width="250" height="544" alt="IMG_1147" src="https://github.com/user-attachments/assets/7bc6bdf3-7904-4f8a-9358-e068b8f6c754" />
+<img width="250" height="544" alt="IMG_1146" src="https://github.com/user-attachments/assets/8364c44c-dd24-4fa6-8e39-8b0f0a942955" />
+<img width="250" height="544" alt="IMG_1145" src="https://github.com/user-attachments/assets/8986b608-db65-4ce1-8e19-26a18d14e572" />
+
+
+
+
 **Framework**
 Expo SDK 54 (managed workflow)
 React Native 0.81.5
@@ -47,3 +55,5 @@ React Native Animated — shutter press feedback
 
 **Target Platforms**
 iOS, Android (and Expo Go for development)
+
+
