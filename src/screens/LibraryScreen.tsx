@@ -6,13 +6,16 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation';
-import { getStamps, getCategories, addCategory, updateCategory, deleteCategory } from '../db/database';
+import {
+  getStamps, getCategories, addCategory, updateCategory, deleteCategory,
+  getFavouriteIds, toggleFavourite,
+} from '../db/database';
 import { Stamp, Category } from '../types';
 import StampImage from '../components/StampImage';
 import { Colors, Radii, Shadows, Typography } from '../theme';
 
 type Nav      = StackNavigationProp<RootStackParamList>;
-type ViewMode = 'stamps' | 'categories';
+type ViewMode = 'stamps' | 'favourites' | 'categories';
 
 const THUMB_SIZE = Math.floor((Dimensions.get('window').width - 32) / 3);
 
@@ -22,6 +25,7 @@ export default function LibraryScreen() {
   const [mode,        setMode]        = useState<ViewMode>('stamps');
   const [stamps,      setStamps]      = useState<Stamp[]>([]);
   const [categories,  setCategories]  = useState<Category[]>([]);
+  const [favIds,      setFavIds]      = useState<Set<number>>(new Set());
   const [editMode,    setEditMode]    = useState(false);
   const [editingName, setEditingName] = useState<Record<number, string>>({});
 
@@ -29,11 +33,23 @@ export default function LibraryScreen() {
   useFocusEffect(useCallback(() => {
     setStamps(getStamps());
     setCategories(getCategories());
+    setFavIds(getFavouriteIds());
   }, []));
 
   function refresh() {
     setStamps(getStamps());
     setCategories(getCategories());
+    setFavIds(getFavouriteIds());
+  }
+
+  function handleToggleFav(stampId: number) {
+    const next = !favIds.has(stampId);
+    toggleFavourite(stampId, next);
+    setFavIds(prev => {
+      const updated = new Set(prev);
+      if (next) updated.add(stampId); else updated.delete(stampId);
+      return updated;
+    });
   }
 
   function handleAddCategory() {
@@ -58,6 +74,9 @@ export default function LibraryScreen() {
     if (newName?.trim()) { updateCategory(id, newName.trim()); refresh(); }
   }
 
+  const displayedStamps =
+    mode === 'favourites' ? stamps.filter(s => favIds.has(s.id)) : stamps;
+
   return (
     <View style={styles.container}>
       {/* ── Header ── */}
@@ -69,38 +88,59 @@ export default function LibraryScreen() {
 
         <Text style={styles.title}>Library</Text>
 
-        {/* Toggle: Stamps | Categories */}
+        {/* Toggle: Stamps | ⭐ Favourites | Categories */}
         <View style={styles.toggle}>
-          {(['stamps', 'categories'] as ViewMode[]).map(m => (
+          {([
+            { key: 'stamps',     label: 'Stamps'  },
+            { key: 'favourites', label: '★'       },
+            { key: 'categories', label: 'Sets'    },
+          ] as { key: ViewMode; label: string }[]).map(({ key, label }) => (
             <TouchableOpacity
-              key={m}
-              style={[styles.toggleBtn, mode === m && styles.toggleActive]}
-              onPress={() => { setMode(m); setEditMode(false); }}
+              key={key}
+              style={[styles.toggleBtn, mode === key && styles.toggleActive]}
+              onPress={() => { setMode(key); setEditMode(false); }}
             >
-              <Text style={[styles.toggleText, mode === m && styles.toggleTextActive]}>
-                {m.charAt(0).toUpperCase() + m.slice(1)}
+              <Text style={[styles.toggleText, mode === key && styles.toggleTextActive]}>
+                {label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* ── Stamp grid ── */}
-      {mode === 'stamps' && (
+      {/* ── Stamp / Favourites grid ── */}
+      {(mode === 'stamps' || mode === 'favourites') && (
         <FlatList
-          data={stamps}
+          data={displayedStamps}
           keyExtractor={s => String(s.id)}
           numColumns={3}
           contentContainerStyle={styles.grid}
           ListEmptyComponent={
-            <Text style={styles.empty}>No stamps yet — take your first one!</Text>
+            <Text style={styles.empty}>
+              {mode === 'favourites'
+                ? 'No favourites yet — tap ★ on a stamp to save it here.'
+                : 'No stamps yet — take your first one!'}
+            </Text>
           }
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.stampCell}
               onPress={() => navigation.navigate('StampDetail', { stampId: item.id })}
+              onLongPress={() => handleToggleFav(item.id)}
             >
-              <StampImage uri={item.imageUri} size={THUMB_SIZE} />
+              <View>
+                <StampImage
+                  uri={item.imageUri}
+                  size={THUMB_SIZE}
+                  filter={item.filter}
+                  shape={item.shape}
+                />
+                {favIds.has(item.id) && (
+                  <View style={styles.favBadge}>
+                    <Text style={styles.favBadgeIcon}>★</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.stampName} numberOfLines={1}>{item.name}</Text>
             </TouchableOpacity>
           )}
@@ -127,7 +167,6 @@ export default function LibraryScreen() {
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.catRow}
-                // In normal mode, tap category to drill into its stamps
                 onPress={() => !editMode && navigation.navigate('CategoryDetail', {
                   categoryId:   item.id,
                   categoryName: item.name,
@@ -135,7 +174,6 @@ export default function LibraryScreen() {
                 disabled={editMode}
               >
                 {editMode ? (
-                  // In edit mode: inline rename input
                   <TextInput
                     style={styles.catInput}
                     value={editingName[item.id] ?? item.name}
@@ -195,6 +233,13 @@ const styles = StyleSheet.create({
   grid: { padding: 8 },
   stampCell: { width: THUMB_SIZE, margin: 4, alignItems: 'center' },
   stampName: { ...Typography.small, marginTop: 4, textAlign: 'center' },
+  favBadge: {
+    position: 'absolute', top: 4, right: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 10,
+    paddingHorizontal: 4, paddingVertical: 1,
+  },
+  favBadgeIcon: { fontSize: 11, color: '#FFDD55' },
   empty:     { textAlign: 'center', marginTop: 60, ...Typography.body, color: Colors.muted },
   catToolbar: {
     flexDirection: 'row', justifyContent: 'flex-end',

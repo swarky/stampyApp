@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Colors, Radii } from '../theme';
+import { StampFilter, StampShape } from '../types';
 
 import CameraScreen        from '../screens/CameraScreen';
 import LibraryScreen       from '../screens/LibraryScreen';
@@ -18,7 +19,7 @@ import StampPickerScreen   from '../screens/StampPickerScreen';
 // ─── Route param types ────────────────────────────────────────────────────────
 export type RootStackParamList = {
   Tabs:           undefined;
-  SaveStamp:      { imageUri: string };
+  SaveStamp:      { imageUri: string; filter: StampFilter; shape: StampShape };
   StampDetail:    { stampId: number };
   Settings:       undefined;
   CategoryDetail: { categoryId: number; categoryName: string };

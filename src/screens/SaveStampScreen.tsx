@@ -33,7 +33,7 @@ function previewRotation(): number {
 export default function SaveStampScreen() {
   const route      = useRoute<Route>();
   const navigation = useNavigation<Nav>();
-  const { imageUri } = route.params;
+  const { imageUri, filter = 'original', shape = 'square' } = route.params;
 
   const [name,               setName]               = useState(defaultStampName);
   const [note,               setNote]               = useState('');
@@ -66,6 +66,8 @@ export default function SaveStampScreen() {
       note,
       date:       today,
       categoryId: selectedCategory,
+      filter,
+      shape,
     });
 
     // Auto-assign to today's calendar slot if none exists yet
@@ -87,7 +89,12 @@ export default function SaveStampScreen() {
         {/* Tilted stamp preview – the stamp "arrives" from the camera already rotated */}
         <View style={styles.previewArea}>
           <View style={{ transform: [{ rotate: `${rotation}deg` }] }}>
-            <StampImage uri={imageUri} size={220} frameColor={Colors.vanilla} />
+            <StampImage
+              uri={imageUri} size={220}
+              frameColor={Colors.vanilla}
+              filter={filter}
+              shape={shape}
+            />
           </View>
         </View>
 

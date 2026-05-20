@@ -1,7 +1,7 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, Text,
-  Dimensions, Animated,
+  Dimensions, Animated, PanResponder,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Svg, { Path } from 'react-native-svg';
@@ -9,66 +9,96 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { RootStackParamList } from '../navigation';
-import { buildStampPath } from '../components/StampBorder';
+import { buildShapePath } from '../components/StampBorder';
 import { Colors, Radii } from '../theme';
+import { StampFilter, StampShape } from '../types';
 
 // ─── Screen dimensions ────────────────────────────────────────────────────────
 const { width: SW, height: SH } = Dimensions.get('window');
 
-// ─── Stamp outline formats ────────────────────────────────────────────────────
-// Three formats the user can cycle through with the format button.
-type Format = 'square' | 'landscape' | 'portrait';
-const FORMATS: Format[] = ['square', 'landscape', 'portrait'];
-const FORMAT_LABELS: Record<Format, string> = {
-  square:    '⬛',
-  landscape: '▬',
-  portrait:  '▮',
+// ─── Filters ─────────────────────────────────────────────────────────────────
+const FILTERS: StampFilter[]               = ['original', 'bw', 'fade'];
+const FILTER_ICONS: Record<StampFilter, string> = {
+  original: '🌈',
+  bw:       '◑',
+  fade:     '☁️',
 };
-const FORMAT_DIMS: Record<Format, { w: number; h: number }> = {
-  square:    { w: SW * 0.72, h: SW * 0.72 },
-  landscape: { w: SW * 0.82, h: SW * 0.52 },
-  portrait:  { w: SW * 0.55, h: SW * 0.78 },
+const FILTER_LABELS: Record<StampFilter, string> = {
+  original: 'Original',
+  bw:       'B&W',
+  fade:     'Fade',
 };
 
-// Vertical offset from the top of the screen to the stamp outline
-const STAMP_TOP = 110;
+// ─── Formats (shape + orientation) ───────────────────────────────────────────
+// Each entry describes what the user sees and what crop to apply.
+type FormatEntry = {
+  shape:   StampShape;
+  label:   string;
+  icon:    string;
+  w:       number;  // stamp outline width
+  h:       number;  // stamp outline height
+};
 
-// Perforation radius for the viewfinder outline
-const PERF_R = 9;
+const FORMATS: FormatEntry[] = [
+  { shape: 'square',    label: 'Square',    icon: '⬛', w: SW * 0.72, h: SW * 0.72 },
+  { shape: 'landscape', label: 'Landscape', icon: '▬',  w: SW * 0.82, h: SW * 0.52 },
+  { shape: 'portrait',  label: 'Portrait',  icon: '▮',  w: SW * 0.55, h: SW * 0.78 },
+  { shape: 'diamond',   label: 'Diamond',   icon: '◇',  w: SW * 0.72, h: SW * 0.72 },
+  { shape: 'triangle',  label: 'Triangle',  icon: '△',  w: SW * 0.72, h: SW * 0.72 },
+];
+
+const STAMP_TOP  = 110;  // vertical offset from screen top to stamp outline
+const PERF_R     = 9;    // perforation radius for viewfinder outline
+const SWIPE_DIST = 40;   // minimum horizontal swipe to change filter
 
 type Nav = StackNavigationProp<RootStackParamList, 'Tabs'>;
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef  = useRef<CameraView>(null);
-  const navigation = useNavigation<Nav>();
+  const cameraRef   = useRef<CameraView>(null);
+  const navigation  = useNavigation<Nav>();
 
-  const [shooting,      setShooting]      = useState(false);
-  const [formatIndex,   setFormatIndex]   = useState(0);     // current format
-  const shutterAnim = useRef(new Animated.Value(1)).current;  // for shutter feedback
+  const [shooting,     setShooting]     = useState(false);
+  const [formatIndex,  setFormatIndex]  = useState(0);
+  const [filterIndex,  setFilterIndex]  = useState(0);
+  const shutterAnim = useRef(new Animated.Value(1)).current;
 
   const format = FORMATS[formatIndex];
-  const { w: stampW, h: stampH } = FORMAT_DIMS[format];
-  const stampX = (SW - stampW) / 2;
-  const stampY = STAMP_TOP;
+  const filter = FILTERS[filterIndex];
 
-  // Rebuild the SVG paths whenever the format changes
-  const stampPath  = buildStampPath(stampX, stampY, stampX + stampW, stampY + stampH, PERF_R);
+  // SVG coordinates of the stamp outline
+  const stampX = (SW - format.w) / 2;
+  const stampY = STAMP_TOP;
+  const stampPath  = buildShapePath(format.shape, stampX, stampY, stampX + format.w, stampY + format.h, PERF_R);
   const fullScreen = `M 0 0 H ${SW} V ${SH} H 0 Z`;
 
-  // Cycle through the three available formats
-  function cycleFormat() {
-    setFormatIndex(i => (i + 1) % FORMATS.length);
-  }
+  // ── Swipe gesture to change filter ────────────────────────────────────────
+  // Attaching to the camera overlay so the whole screen is swipeable.
+  const swipeStart = useRef(0);
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder:  (_, g) => Math.abs(g.dx) > 8,
+    onPanResponderGrant: (_, g) => { swipeStart.current = g.x0; },
+    onPanResponderRelease: (_, g) => {
+      if (g.dx < -SWIPE_DIST) {
+        // Swipe left → next filter
+        setFilterIndex(i => (i + 1) % FILTERS.length);
+      } else if (g.dx > SWIPE_DIST) {
+        // Swipe right → previous filter
+        setFilterIndex(i => (i - 1 + FILTERS.length) % FILTERS.length);
+      }
+    },
+  })).current;
 
-  // Animate the shutter button on press for tactile feedback
+  // ── Shutter feedback animation ────────────────────────────────────────────
   function animateShutter() {
     Animated.sequence([
-      Animated.timing(shutterAnim, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+      Animated.timing(shutterAnim, { toValue: 0.82, duration: 80,  useNativeDriver: true }),
       Animated.timing(shutterAnim, { toValue: 1,    duration: 120, useNativeDriver: true }),
     ]).start();
   }
 
+  // ── Take picture ──────────────────────────────────────────────────────────
   async function takePicture() {
     if (!cameraRef.current || shooting) return;
     setShooting(true);
@@ -78,7 +108,7 @@ export default function CameraScreen() {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
       if (!photo) return;
 
-      // Scale from screen coordinates to actual photo pixels
+      // Scale screen stamp coordinates to actual photo pixels
       const scaleX = photo.width  / SW;
       const scaleY = photo.height / SH;
 
@@ -86,22 +116,26 @@ export default function CameraScreen() {
         photo.uri,
         [{
           crop: {
-            originX: stampX * scaleX,
-            originY: stampY * scaleY,
-            width:   stampW * scaleX,
-            height:  stampH * scaleY,
+            originX: stampX        * scaleX,
+            originY: stampY        * scaleY,
+            width:   format.w      * scaleX,
+            height:  format.h      * scaleY,
           },
         }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
       );
 
-      navigation.navigate('SaveStamp', { imageUri: cropped.uri });
+      navigation.navigate('SaveStamp', {
+        imageUri: cropped.uri,
+        filter,
+        shape: format.shape,
+      });
     } finally {
       setShooting(false);
     }
   }
 
-  // ── Permission gate ─────────────────────────────────────────────────────────
+  // ── Permission gate ───────────────────────────────────────────────────────
   if (!permission) return <View style={styles.container} />;
 
   if (!permission.granted) {
@@ -115,13 +149,17 @@ export default function CameraScreen() {
     );
   }
 
-  // ── Camera UI ───────────────────────────────────────────────────────────────
+  // ── Camera UI ─────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
 
-      {/* Single SVG: dark mask outside stamp + perforated outline */}
-      <Svg style={StyleSheet.absoluteFill} width={SW} height={SH}>
+      {/* SVG overlay: dark mask outside the stamp shape + perforated outline */}
+      <Svg
+        style={StyleSheet.absoluteFill}
+        width={SW} height={SH}
+        {...panResponder.panHandlers}
+      >
         <Path
           d={`${fullScreen} ${stampPath}`}
           fill={Colors.overlay}
@@ -130,12 +168,36 @@ export default function CameraScreen() {
         <Path d={stampPath} fill="none" stroke="white" strokeWidth={2.5} />
       </Svg>
 
-      {/* Bottom controls: format button (left) + shutter button (center) */}
+      {/* ── Filter selector (above controls) ── */}
+      <View style={styles.filterRow}>
+        {FILTERS.map((f, i) => {
+          const active = i === filterIndex;
+          return (
+            <TouchableOpacity
+              key={f}
+              style={[styles.filterItem, active && styles.filterItemActive]}
+              onPress={() => setFilterIndex(i)}
+            >
+              <Text style={[styles.filterIcon, active && styles.filterIconActive]}>
+                {FILTER_ICONS[f]}
+              </Text>
+              <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>
+                {FILTER_LABELS[f]}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* ── Bottom controls: format button + shutter ── */}
       <View style={styles.controls}>
-        {/* Format cycle button – smaller, sits left of the shutter */}
-        <TouchableOpacity style={styles.formatBtn} onPress={cycleFormat}>
-          <Text style={styles.formatLabel}>{FORMAT_LABELS[format]}</Text>
-          <Text style={styles.formatText}>{format}</Text>
+        {/* Format cycle button */}
+        <TouchableOpacity
+          style={styles.formatBtn}
+          onPress={() => setFormatIndex(i => (i + 1) % FORMATS.length)}
+        >
+          <Text style={styles.formatIcon}>{format.icon}</Text>
+          <Text style={styles.formatLabel}>{format.label}</Text>
         </TouchableOpacity>
 
         {/* Shutter button */}
@@ -149,7 +211,7 @@ export default function CameraScreen() {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* Placeholder spacer to keep shutter visually centered */}
+        {/* Spacer to keep shutter visually centred */}
         <View style={styles.formatBtn} />
       </View>
     </View>
@@ -160,6 +222,31 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   center:    { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: Colors.cream },
   permText:  { fontSize: 16, textAlign: 'center', marginBottom: 16, color: Colors.ink },
+
+  // Filter row
+  filterRow: {
+    position: 'absolute', bottom: 140,
+    left: 0, right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  filterItem: {
+    alignItems: 'center',
+    paddingVertical: 6, paddingHorizontal: 14,
+    borderRadius: Radii.md,
+    backgroundColor: 'rgba(0,0,0,0.30)',
+  },
+  filterItemActive: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)',
+  },
+  filterIcon:        { fontSize: 18 },
+  filterIconActive:  { fontSize: 22 },
+  filterLabel:       { fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
+  filterLabelActive: { color: '#fff', fontWeight: '700' },
+
+  // Bottom controls
   controls: {
     position: 'absolute', bottom: 48,
     left: 0, right: 0,
@@ -169,13 +256,13 @@ const styles = StyleSheet.create({
     gap: 24,
   },
   formatBtn: {
-    width: 60, height: 60,
+    width: 62, height: 62,
     borderRadius: Radii.md,
     backgroundColor: 'rgba(255,255,255,0.18)',
     justifyContent: 'center', alignItems: 'center',
   },
-  formatLabel: { fontSize: 18 },
-  formatText:  { fontSize: 9, color: '#fff', marginTop: 2, textTransform: 'capitalize' },
+  formatIcon:  { fontSize: 20 },
+  formatLabel: { fontSize: 9, color: '#fff', marginTop: 2 },
   shootBtn: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: '#fff',

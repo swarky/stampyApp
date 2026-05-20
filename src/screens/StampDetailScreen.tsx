@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity,
   ScrollView, KeyboardAvoidingView, Platform, Alert,
@@ -6,17 +6,18 @@ import {
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation';
-import { getStampById, getCategories, updateStamp, deleteStamp } from '../db/database';
+import { getStampById, getCategories, updateStamp, deleteStamp, isFavourite, toggleFavourite } from '../db/database';
 import { Stamp, Category } from '../types';
 import StampImage from '../components/StampImage';
 import { Colors, Radii, Shadows, Typography } from '../theme';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 
 type Route = RouteProp<RootStackParamList, 'StampDetail'>;
 type Nav   = StackNavigationProp<RootStackParamList, 'StampDetail'>;
 
 /** Stable rotation derived from stamp id so it never changes between renders. */
 function stampRotation(id: number): number {
-  // Seeded "random" using sin – gives a consistent value per id
   const x = Math.sin(id * 127.1) * 10000;
   return ((x - Math.floor(x)) * 16) - 8; // –8° to +8°
 }
@@ -26,6 +27,8 @@ export default function StampDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { stampId } = route.params;
 
+  const stampRef = useRef<View>(null);
+
   const [stamp,              setStamp]              = useState<Stamp | null>(null);
   const [categories,         setCategories]         = useState<Category[]>([]);
   const [name,               setName]               = useState('');
@@ -33,6 +36,8 @@ export default function StampDetailScreen() {
   const [categoryId,         setCategoryId]         = useState<number | null>(null);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [dirty,              setDirty]              = useState(false);
+  const [fav,                setFav]                = useState(false);
+  const [sharing,            setSharing]            = useState(false);
 
   useEffect(() => {
     const s = getStampById(stampId);
@@ -43,6 +48,7 @@ export default function StampDetailScreen() {
       setCategoryId(s.categoryId);
     }
     setCategories(getCategories());
+    setFav(isFavourite(stampId));
   }, [stampId]);
 
   function save() {
@@ -50,6 +56,25 @@ export default function StampDetailScreen() {
     updateStamp(stampId, name.trim(), note, categoryId);
     setDirty(false);
     navigation.goBack();
+  }
+
+  function handleToggleFav() {
+    const next = !fav;
+    toggleFavourite(stampId, next);
+    setFav(next);
+  }
+
+  async function handleShare() {
+    if (!stampRef.current || sharing) return;
+    try {
+      setSharing(true);
+      const uri = await captureRef(stampRef, { format: 'png', quality: 1 });
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: name });
+    } catch (e) {
+      Alert.alert('Share failed', 'Could not capture stamp image.');
+    } finally {
+      setSharing(false);
+    }
   }
 
   function confirmDelete() {
@@ -78,26 +103,49 @@ export default function StampDetailScreen() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
 
-        {/* Name – editable inline at the top */}
-        <TextInput
-          style={styles.nameInput}
-          value={name}
-          onChangeText={t => { setName(t); setDirty(true); }}
-          maxLength={80}
-          placeholder="Stamp name"
-          placeholderTextColor={Colors.muted}
-        />
+        {/* ── Top row: name + favourite star ── */}
+        <View style={styles.nameRow}>
+          <TextInput
+            style={styles.nameInput}
+            value={name}
+            onChangeText={t => { setName(t); setDirty(true); }}
+            maxLength={80}
+            placeholder="Stamp name"
+            placeholderTextColor={Colors.muted}
+          />
+          <TouchableOpacity style={styles.favBtn} onPress={handleToggleFav}>
+            <Text style={styles.favIcon}>{fav ? '★' : '☆'}</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Tilted stamp image – the visual centrepiece */}
+        {/* ── Tilted stamp image ── */}
         <View style={styles.stampArea}>
           <View style={{ transform: [{ rotate: `${rotation}deg` }] }}>
-            <StampImage uri={stamp.imageUri} size={260} frameColor={Colors.vanilla} />
+            <StampImage
+              ref={stampRef}
+              uri={stamp.imageUri}
+              size={260}
+              frameColor={Colors.vanilla}
+              filter={stamp.filter}
+              shape={stamp.shape}
+            />
           </View>
         </View>
 
         <Text style={styles.date}>{stamp.date}</Text>
 
-        {/* Note */}
+        {/* ── Share button ── */}
+        <TouchableOpacity
+          style={[styles.shareBtn, sharing && { opacity: 0.5 }]}
+          onPress={handleShare}
+          disabled={sharing}
+        >
+          <Text style={styles.shareBtnText}>
+            {sharing ? 'Preparing…' : '↑  Share stamp'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* ── Note ── */}
         <Text style={styles.label}>Note</Text>
         <TextInput
           style={[styles.input, styles.noteInput]}
@@ -109,7 +157,7 @@ export default function StampDetailScreen() {
         />
         <Text style={styles.charCount}>{note.length} / 500</Text>
 
-        {/* Category */}
+        {/* ── Category ── */}
         <Text style={styles.label}>Category</Text>
         <TouchableOpacity
           style={styles.categoryBtn}
@@ -135,14 +183,14 @@ export default function StampDetailScreen() {
           </View>
         )}
 
-        {/* Save button – only shown when there are unsaved changes */}
+        {/* Save – only shown when there are unsaved changes */}
         {dirty && (
           <TouchableOpacity style={styles.saveBtn} onPress={save}>
             <Text style={styles.saveBtnText}>Save Changes</Text>
           </TouchableOpacity>
         )}
 
-        {/* Delete button */}
+        {/* Delete */}
         <TouchableOpacity style={styles.deleteBtn} onPress={confirmDelete}>
           <Text style={styles.deleteBtnText}>🗑  Delete stamp</Text>
         </TouchableOpacity>
@@ -156,19 +204,38 @@ const styles = StyleSheet.create({
     padding: 20, alignItems: 'center',
     backgroundColor: Colors.cream, flexGrow: 1,
   },
-  nameInput: {
+  nameRow: {
     width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 2, borderBottomColor: Colors.border,
+    marginBottom: 4,
+  },
+  nameInput: {
+    flex: 1,
     fontSize: 22, fontWeight: '700', color: Colors.ink,
     textAlign: 'center',
-    paddingVertical: 8, marginBottom: 4,
-    borderBottomWidth: 2, borderBottomColor: Colors.border,
+    paddingVertical: 8,
   },
+  favBtn: { padding: 8 },
+  favIcon: { fontSize: 26, color: Colors.vanilla === '#FFEBAF' ? '#F5A623' : Colors.moonstone },
   stampArea: {
     width: '100%', height: 300,
     justifyContent: 'center', alignItems: 'center',
     marginVertical: 8,
   },
-  date:  { ...Typography.small, marginBottom: 12 },
+  date: { ...Typography.small, marginBottom: 12 },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10, paddingHorizontal: 28,
+    borderRadius: Radii.xl,
+    backgroundColor: Colors.card,
+    borderWidth: 1.5, borderColor: Colors.moonstone,
+    marginBottom: 8,
+    ...Shadows.soft,
+  },
+  shareBtnText: { color: Colors.moonstone, fontSize: 15, fontWeight: '600' },
   label: { ...Typography.label, alignSelf: 'flex-start', marginTop: 16, marginBottom: 4 },
   input: {
     width: '100%',
